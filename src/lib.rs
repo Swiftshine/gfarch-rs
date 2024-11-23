@@ -10,6 +10,18 @@ pub mod gfarch {
         LZ77
     }
 
+    pub fn calculate_checksum(input: &str) -> u32 {
+        let mut result: u32 = 0;
+
+        for c in input.bytes() {
+            // if c == 0 {
+            //     break;
+            // }
+            result = c as u32 + result.wrapping_mul(137);
+        }
+
+        result
+    }
 
     /// Extracts the contents of a GfArch archive.
     /// 
@@ -36,4 +48,17 @@ pub mod gfarch {
     }
 
     
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_checksum() {
+        let sample = "sea_turtle_01.brres";
+        let checksum = gfarch::calculate_checksum(sample);
+        assert_eq!(0xCC91B7B8, checksum.swap_bytes());
+    }
 }
