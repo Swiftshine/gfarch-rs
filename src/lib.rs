@@ -10,6 +10,13 @@ pub mod gfarch {
         LZ77
     }
 
+    /// Calculates a checksum from a string, most commonly a filename.
+    /// 
+    /// ### Parameters
+    /// `input`: The input string.
+    /// 
+    /// ### Returns
+    /// The output checksum as a `u32`.
     pub fn calculate_checksum(input: &str) -> u32 {
         let mut result: u32 = 0;
 
