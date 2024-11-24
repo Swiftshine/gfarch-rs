@@ -32,7 +32,6 @@ pub mod gfarch {
     }
 
     struct FileEntry {
-        _checksum: u32,
         name_offset: usize,
         decompressed_size: usize,
         decompressed_offset: usize,
@@ -48,13 +47,11 @@ pub mod gfarch {
         fn from_bytes(input: &[u8]) -> Self {
             assert_eq!(0x10, input.len());
 
-            let _checksum = LittleEndian::read_u32(&input[..4]);
             let name_offset = (LittleEndian::read_u32(&input[4..8]) & 0x00FFFFFF) as usize;
             let decompressed_size = LittleEndian::read_u32(&input[8..0xC]) as usize;
             let decompressed_offset = LittleEndian::read_u32(&input[0xC..0x10]) as usize;
 
             Self {
-                _checksum,
                 name_offset,
                 decompressed_size,
                 decompressed_offset
