@@ -1,4 +1,4 @@
-pub mod lz77 {
+pub mod lz10 {
     /// Adapted from https://github.com/LittleBigBug/QuickBMS/blob/master/src/included/nintendo.c
     /// 
     /// ### Parameters
@@ -71,7 +71,7 @@ pub mod gfarch {
     use byteorder::{ByteOrder, LittleEndian};
     use thiserror;
 
-    use crate::lz77;
+    use crate::lz10;
 
     #[derive(thiserror::Error, Debug)]
     /// Errors for various GfArch problems. 
@@ -104,7 +104,7 @@ pub mod gfarch {
     /// The compression type of a GfArch archive.
     pub enum CompressionType {
         BPE,
-        LZ77
+        LZ10
     }
 
     struct FileEntry {
@@ -212,7 +212,7 @@ pub mod gfarch {
         let raw_compression_type = LittleEndian::read_u32(&input[gfcp_offset + 0x8..gfcp_offset + 0xC]); 
         let compression_type = match raw_compression_type {
             1 => CompressionType::BPE,
-            3 => CompressionType::LZ77,
+            3 => CompressionType::LZ10,
             _ => {
                 return Err(GfArchError::UnsupportedCompressionTypeError(raw_compression_type))
             }
@@ -221,12 +221,12 @@ pub mod gfarch {
 
         let decompressed_chunk = match compression_type {
             CompressionType::BPE => bpe::decode(&input[gfcp_offset + 0x14..], bpe::DEFAULT_STACK_SIZE),
-            CompressionType::LZ77 => {
+            CompressionType::LZ10 => {
                 let decompressed_size = LittleEndian::read_u32(
                     &input[gfcp_offset + 0xC..gfcp_offset + 0x10]
                 );
 
-                lz77::decompress(
+                lz10::decompress(
                     &input[gfcp_offset + 0x14..],
                     decompressed_size as usize
                 )
@@ -324,7 +324,7 @@ pub mod gfarch {
         // compress all data
         let compressed_chunk = match compression_type {
             CompressionType::BPE => bpe::encode(&decompressed_chunk),
-            CompressionType::LZ77 => todo!()
+            CompressionType::LZ10 => todo!()
         };
 
         let mut file_name_section_length = 0usize;
@@ -466,7 +466,7 @@ pub mod gfarch {
 
             match compression_type {
                 CompressionType::BPE => 1,
-                CompressionType::LZ77 => 3
+                CompressionType::LZ10 => 3
             }
         );
 

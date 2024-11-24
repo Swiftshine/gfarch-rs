@@ -4,11 +4,11 @@ Rust crate for handling Good-Feel's [GfArch files](https://swiftshine.github.io/
 ## Capabilities
 ### Archive Creation
 - [X] Archives with Byte Pair Encoding
-- [ ] Archives with LZ77
+- [ ] Archives with LZ10
 
 ### Archive Extraction
 - [X] Archives with Byte Pair Encoding
-- [X] Archives with LZ77
+- [X] Archives with LZ10
 
 ## Usage
 ### Archive Creation
