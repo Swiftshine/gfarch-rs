@@ -86,6 +86,12 @@ pub mod gfarch {
         UnsupportedCompressionTypeError(u32)
     }
 
+    /// Allows the user to specify a custom GFCP offset.
+    pub enum GFCPOffset {
+        Default,
+        Custom(usize)
+    }
+
     #[derive(PartialEq)]
     /// The version of a GfArch archive.
     pub enum Version {
@@ -254,8 +260,9 @@ pub mod gfarch {
     /// 
     /// `compression_type`: The compression type.
     /// 
-    /// `is_yww`: Indicates if the archive is for Yoshi's Woolly World.
-    /// This moves the GFCP offset to a consistent `0x2000`.
+    /// `offset`: An offset for the GFCP header, if specified.
+    /// For Yoshi's Woolly World, use `0x2000`.
+    /// 
     /// ### Returns
     /// A `Vec<u8>`, containing the archive.
     pub fn pack_from_bytes(
@@ -263,7 +270,7 @@ pub mod gfarch {
         filenames: &[String],
         version: Version,
         compression_type: CompressionType,
-        is_yww: bool
+        offset: GFCPOffset
     ) -> Vec<u8> {
         assert_eq!(input.len(), filenames.len());
 
@@ -276,7 +283,7 @@ pub mod gfarch {
             }).collect();
 
 
-        pack_from_files(&files, version, compression_type, is_yww)
+        pack_from_files(&files, version, compression_type, offset)
     }
     
     /// Creates a GfArch archive from given files.
@@ -288,15 +295,15 @@ pub mod gfarch {
     /// 
     /// `compression_type`: The compression type.
     /// 
-    /// `is_yww`: Indicates if the archive is for Yoshi's Woolly World.
-    /// This moves the GFCP offset to a consistent `0x2000`.
+    /// `offset`: An offset for the GFCP header, if specified.
+    /// For Yoshi's Woolly World, use `0x2000`.
     /// ### Returns
     /// A `Vec<u8>`, containing the archive.
     pub fn pack_from_files(
         input: &[FileContents],
         version: Version,
         compression_type: CompressionType,
-        is_yww: bool
+        offset: GFCPOffset
     ) -> Vec<u8> {
         // Yoshi's Woolly World is the only known game
         // that consistently picks the same offset
@@ -325,15 +332,19 @@ pub mod gfarch {
         for file in input.iter() {
             file_name_section_length += file.filename.len();
         }
-        
-        let archive_size = if is_yww {
-            0x2000 + 0x14 + compressed_chunk.len()
-        } else {
-            0x30 + // archive header
-            (0x10 * file_count) + // file entries
-            file_name_section_length.next_multiple_of(0x10) + // filenames
-            0x14 + // compression header
-            compressed_chunk.len() // compressed data   
+
+        let archive_size = match offset {
+            GFCPOffset::Default => {
+                0x30 + // archive header
+                (file_count * 0x10) + // file entries
+                file_name_section_length.next_multiple_of(0x10) + // filenames
+                0x14 + // compression header
+                compressed_chunk.len() // compressed data
+            }
+
+            GFCPOffset::Custom(offs) => {
+                offs + 0x14 + compressed_chunk.len()
+            }
         };
         
         // write archive header
@@ -371,13 +382,9 @@ pub mod gfarch {
         let file_info_size = file_info_size.next_multiple_of(0x10);
 
         // gfcp offset
-        let gfcp_offset = if is_yww {
-            // Yoshi's Woolly World is the only known game
-            // that consistently picks the same offset
-            0x2000
-        } else {
-            0x30 + // header size
-            file_info_size
+        let gfcp_offset: u32 = match offset {
+            GFCPOffset::Default => 0x30 + file_info_size,
+            GFCPOffset::Custom(offs) => offs as u32
         };
 
         LittleEndian::write_u32(&mut output[0x14..0x18], gfcp_offset);

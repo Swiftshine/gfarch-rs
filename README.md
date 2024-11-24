@@ -18,7 +18,7 @@ Rust crate for handling Good-Feel's [GfArch files](https://swiftshine.github.io/
         &files,
         Version::V3,
         CompressionType::BPE,
-        false
+        GFCPOffset::Default
     );
 
     // "archive_2" is now also a GoodFeelArchive
@@ -27,7 +27,7 @@ Rust crate for handling Good-Feel's [GfArch files](https://swiftshine.github.io/
         &filenames,
         Version::V3,
         CompressionType::BPE,
-        false
+        GFCPOffset::Default
     );
 
 ```
