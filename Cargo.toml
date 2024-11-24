@@ -3,6 +3,10 @@ name = "gfarch"
 version = "0.1.0"
 edition = "2021"
 exclude = ["/scratch/", "main.rs"]
+description = "gfarch is a Rust crate for Good-Feel's GoodFeelArchives."
+readme = "README.md"
+keywords = ["GoodFeel", "Nintendo"]
+license = "MIT"
 
 [dependencies]
 bpe-rs = "0.1.0"
