@@ -7,6 +7,7 @@ description = "gfarch is a Rust crate for Good-Feel's GoodFeelArchives."
 readme = "README.md"
 keywords = ["GoodFeel", "Nintendo"]
 license = "MIT"
+repository = "https://github.com/Swiftshine/gfarch-rs"
 
 [dependencies]
 bpe-rs = "0.1.0"
