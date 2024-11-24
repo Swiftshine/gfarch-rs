@@ -8,7 +8,7 @@ Rust crate for handling Good-Feel's [GfArch files](https://swiftshine.github.io/
 
 ### Archive Extraction
 - [X] Archives with Byte Pair Encoding
-- [ ] Archives with LZ77
+- [X] Archives with LZ77
 
 ## Usage
 ### Archive Creation
