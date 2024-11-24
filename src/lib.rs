@@ -16,13 +16,15 @@ pub mod gfarch {
         UnsupportedCompressionTypeError(u32)
     }
 
+    #[derive(PartialEq)]
     /// The version of a GfArch archive.
     pub enum Version {
-        V2_0,
-        V3_0,
+        V2,
+        V3,
         V3_1,
     }
 
+    #[derive(PartialEq)]
     /// The compression type of a GfArch archive.
     pub enum CompressionType {
         BPE,
@@ -50,7 +52,7 @@ pub mod gfarch {
             let name_offset = (LittleEndian::read_u32(&input[4..8]) & 0x00FFFFFF) as usize;
             let decompressed_size = LittleEndian::read_u32(&input[8..0xC]) as usize;
             let decompressed_offset = LittleEndian::read_u32(&input[0xC..0x10]) as usize;
-            
+
             Self {
                 _checksum,
                 name_offset,
@@ -166,17 +168,243 @@ pub mod gfarch {
 
 
 
+    /// Creates a GfArch archive from given files and filenames.
+    /// 
+    /// ### Parameters
+    /// `input`: The files to be put in the archive.
+    /// 
+    /// `filenames`: The names of each file in the archive.
+    /// 
+    /// `version`: The archive version.
+    /// 
+    /// `compression_type`: The compression type.
+    /// 
+    /// `is_yww`: Indicates if the archive is for Yoshi's Woolly World.
+    /// This moves the GFCP offset to a consistent `0x2000`.
+    /// ### Returns
+    /// A `Vec<u8>`, containing the archive.
+    pub fn pack_from_bytes(
+        input: &[Vec<u8>],
+        filenames: &[String],
+        version: Version,
+        compression_type: CompressionType,
+        is_yww: bool
+    ) -> Vec<u8> {
+        assert_eq!(input.len(), filenames.len());
+
+        let files: Vec::<FileContents> = (0..input.len())
+            .map(|i| {
+                FileContents {
+                    contents: input[i].to_vec(),
+                    filename: filenames[i].clone()
+                }
+            }).collect();
+
+
+        pack_from_files(&files, version, compression_type, is_yww)
+    }
+    
     /// Creates a GfArch archive from given files.
     /// 
     /// ### Parameters
     /// `input`: The files to be put in the archive.
+    /// 
     /// `version`: The archive version.
+    /// 
     /// `compression_type`: The compression type.
     /// 
+    /// `is_yww`: Indicates if the archive is for Yoshi's Woolly World.
+    /// This moves the GFCP offset to a consistent `0x2000`.
     /// ### Returns
     /// A `Vec<u8>`, containing the archive.
-    pub fn pack(_input: &[Vec<u8>], _version: Version, _compression_type: CompressionType) -> Vec<u8> {
-        todo!()
+    pub fn pack_from_files(
+        input: &[FileContents],
+        version: Version,
+        compression_type: CompressionType,
+        is_yww: bool
+    ) -> Vec<u8> {
+        // Yoshi's Woolly World is the only known game
+        // that consistently picks the same offset
+
+        let file_count = input.len();
+
+        // concatenate all data
+        let mut decompressed_chunk = Vec::new();
+
+        for file in input.iter() {
+            decompressed_chunk.extend_from_slice(&file.contents);
+            if decompressed_chunk.len() % 0x10 != 0 {
+                let padding = 0x10 - (decompressed_chunk.len() % 0x10);
+                decompressed_chunk.extend(vec![0; padding]);
+            }
+        }
+
+        // compress all data
+        let compressed_chunk = match compression_type {
+            CompressionType::BPE => bpe::encode(&decompressed_chunk),
+            CompressionType::LZ77 => todo!()
+        };
+
+        let mut file_name_section_length = 0usize;
+
+        for file in input.iter() {
+            file_name_section_length += file.filename.len();
+        }
+        
+        let archive_size = if is_yww {
+            0x2000 + 0x14 + compressed_chunk.len()
+        } else {
+            0x30 + // archive header
+            (0x10 * file_count) + // file entries
+            file_name_section_length.next_multiple_of(0x10) + // filenames
+            0x14 + // compression header
+            compressed_chunk.len() // compressed data   
+        };
+        
+        // write archive header
+        let mut output = vec![0u8; archive_size];
+        
+        // magic
+        output[0] = b'G';
+        output[1] = b'F';
+        output[2] = b'A';
+        output[3] = b'C';
+
+        // version
+        LittleEndian::write_u32(&mut output[0x4..0x8], match version {
+            Version::V2 => 0x0200,
+            Version::V3 => 0x0300,
+            Version::V3_1 => 0x0301,
+        });
+
+        // is compressed
+        output[0x8] = 1;
+
+        // file entry offset
+        LittleEndian::write_u32(&mut output[0xC..0x10], 0x2C);
+
+        // file info size
+        let file_info_size: u32 =
+            4 + // the actual begginning of the file info
+            (file_count * 0x10) as u32 + // file entries
+            file_name_section_length as u32 + // length of all strings
+            file_count as u32; // (plus null terminators)
+
+
+        LittleEndian::write_u32(&mut output[0x10..0x14], file_info_size);
+
+        let file_info_size = file_info_size.next_multiple_of(0x10);
+
+        // gfcp offset
+        let gfcp_offset = if is_yww {
+            // Yoshi's Woolly World is the only known game
+            // that consistently picks the same offset
+            0x2000
+        } else {
+            0x30 + // header size
+            file_info_size
+        };
+
+        LittleEndian::write_u32(&mut output[0x14..0x18], gfcp_offset);
+
+        // payload size
+        LittleEndian::write_u32(
+            &mut output[0x18..0x1C],
+            {
+                0x14 + // gfcp header
+                compressed_chunk.len() as u32
+            }
+        );
+
+        // file count
+        LittleEndian::write_u32(&mut output[0x2C..0x30], file_count as u32);
+
+        // write file entries
+        let mut cur_name_offset =
+            0x30 + // header size
+            (file_count * 0x10); // file entries
+
+        let mut decompressed_offset = 0x30 + file_info_size;
+        for i in 0..file_count {
+            let checksum = calculate_checksum(&input[i].filename);
+            let name_offset = if i == file_count - 1 {
+                // if last entry, apply a flag to indicate so
+                cur_name_offset as u32 | 0x80000000
+            } else {
+                cur_name_offset as u32
+            };
+
+            
+            let data_offset = decompressed_offset;
+            
+            cur_name_offset += input[i].filename.len() + 1;
+            decompressed_offset += input[i].contents.len() as u32;
+
+            let offset = 0x30 + (i * 0x10);
+            
+            
+            // checksum
+            LittleEndian::write_u32(&mut output[offset..offset + 4], checksum);
+            // name offset
+            LittleEndian::write_u32(&mut output[offset + 4..offset + 8], name_offset);
+            // size
+            LittleEndian::write_u32(&mut output[offset + 8..offset + 0xC], input[i].contents.len() as u32);
+            // offset
+            LittleEndian::write_u32(&mut output[offset + 0xC..offset + 0x10], data_offset);
+        }
+
+        // write strings
+        let mut name_offs = 0x30 + (file_count * 0x10);
+
+        for file in input.iter() {
+            let filename_bytes = file.filename.as_bytes();
+            output[name_offs..name_offs + filename_bytes.len()].copy_from_slice(filename_bytes);
+            name_offs += filename_bytes.len();
+                
+            output[name_offs] = 0; // null terminator
+            name_offs += 1;
+        }
+
+        // write compression header
+        // magic
+
+        let gfcp_offset = gfcp_offset as usize;
+        output[gfcp_offset] = b'G';
+        output[gfcp_offset + 1] = b'F';
+        output[gfcp_offset + 2] = b'C';
+        output[gfcp_offset + 3] = b'P';
+
+        
+        // "version" -- this value is always 1
+        LittleEndian::write_u32(&mut output[gfcp_offset + 4..gfcp_offset + 8], 1);
+
+        // write compression type
+        LittleEndian::write_u32(
+            &mut output[gfcp_offset + 8..gfcp_offset + 0xC],
+
+            match compression_type {
+                CompressionType::BPE => 1,
+                CompressionType::LZ77 => 3
+            }
+        );
+
+        // decompressed size
+        LittleEndian::write_u32(
+            &mut output[gfcp_offset + 0xC..gfcp_offset + 0x10],
+            decompressed_chunk.len() as u32
+        );
+
+        // compressed size
+        LittleEndian::write_u32(
+            &mut output[gfcp_offset + 0x10..gfcp_offset + 0x14],
+            compressed_chunk.len() as u32
+        );
+
+        // write the compressed data
+        output[gfcp_offset + 0x14..gfcp_offset + 0x14 + compressed_chunk.len()]
+        .copy_from_slice(&compressed_chunk);
+        
+        output
     }
 
     
