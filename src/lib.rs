@@ -433,7 +433,7 @@ pub mod gfarch {
 
             // update offsets
             cur_name_offset += input[i].filename.len() + 1;
-            decompressed_offset += (input[i].contents.len() as u32).next_multiple_of(0x20);
+            decompressed_offset += (input[i].contents.len() as u32).next_multiple_of(0x10);
         }
 
         // write strings
