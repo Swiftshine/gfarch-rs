@@ -315,10 +315,10 @@ pub mod gfarch {
 
         for file in input.iter() {
             decompressed_chunk.extend_from_slice(&file.contents);
-            if decompressed_chunk.len() % 0x10 != 0 {
-                let padding = 0x10 - (decompressed_chunk.len() % 0x10);
-                decompressed_chunk.extend(vec![0; padding]);
-            }
+            decompressed_chunk.resize(
+                decompressed_chunk.len().next_multiple_of(0x10),
+                0
+            );
         }
 
         // compress all data
@@ -371,7 +371,7 @@ pub mod gfarch {
 
         // file info size
         let file_info_size: u32 =
-            4 + // the actual begginning of the file info
+            4 + // the actual beginning of the file info
             (file_count * 0x10) as u32 + // file entries
             file_name_section_length as u32 + // length of all strings
             file_count as u32; // (plus null terminators)
@@ -415,13 +415,10 @@ pub mod gfarch {
             } else {
                 cur_name_offset as u32
             };
-
+            
             
             let data_offset = decompressed_offset;
             
-            cur_name_offset += input[i].filename.len() + 1;
-            decompressed_offset += input[i].contents.len() as u32;
-
             let offset = 0x30 + (i * 0x10);
             
             
@@ -433,6 +430,10 @@ pub mod gfarch {
             LittleEndian::write_u32(&mut output[offset + 8..offset + 0xC], input[i].contents.len() as u32);
             // offset
             LittleEndian::write_u32(&mut output[offset + 0xC..offset + 0x10], data_offset);
+
+            // update offsets
+            cur_name_offset += input[i].filename.len() + 1;
+            decompressed_offset += (input[i].contents.len() as u32).next_multiple_of(0x20);
         }
 
         // write strings
@@ -483,9 +484,15 @@ pub mod gfarch {
         );
 
         // write the compressed data
-        output[gfcp_offset + 0x14..gfcp_offset + 0x14 + compressed_chunk.len()]
-        .copy_from_slice(&compressed_chunk);
-        
+
+        let target_offset = gfcp_offset + 0x14;
+        let target_len = compressed_chunk.len();
+        if target_offset + target_len > output.len() {
+            output.resize(target_offset + target_len, 0);
+        }
+
+        output[target_offset..target_offset + target_len]
+            .copy_from_slice(&compressed_chunk);
         output
     }
 
