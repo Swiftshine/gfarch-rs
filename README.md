@@ -37,3 +37,10 @@ Rust crate for handling Good-Feel's [GfArch files](https://swiftshine.github.io/
     // "files" is now a collection of file data and filenames
     let files = gfarch::extract(&archive)?;
 ```
+
+
+## Notable Dependencies
+- [bpe-rs](https://crates.io/crates/bpe-rs/)
+    - Byte Pair Encoding
+- [nintendo_lz](https://crates.io/crates/nintendo-lz)
+    - LZ10/LZ11 compression/decompression
