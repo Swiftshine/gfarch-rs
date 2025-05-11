@@ -47,12 +47,6 @@ pub mod gfarch {
         decompressed_offset: usize,
     }
 
-    pub struct FileContents {
-        pub contents: Vec<u8>,
-        pub filename: String
-    }
-
-
     impl FileEntry {
         fn from_bytes(input: &[u8]) -> Self {
             assert_eq!(0x10, input.len());
@@ -106,8 +100,8 @@ pub mod gfarch {
     /// `input`: The archive contents to be extracted.
     /// 
     /// ### Returns
-    /// A `Vec<FileContents>`, containing the contents of the archive.
-    pub fn extract(input: &[u8]) -> Result<Vec<FileContents>, GfArchError> {
+    /// A `Vec<(String, Vec<u8>)>`, containing the contents of the archive.
+    pub fn extract(input: &[u8]) -> Result<Vec<(String, Vec<u8>)>, GfArchError> {
         if &input[..4] != b"GFAC" {
             return Err(GfArchError::ArchiveHeaderError);
         }
@@ -173,27 +167,15 @@ pub mod gfarch {
                 } else {
                     return Err(GfArchError::LZ10DecompressError);
                 }
-
-                // let decompressed_size = LittleEndian::read_u32(
-                //     &input[gfcp_offset + 0xC..gfcp_offset + 0x10]
-                // );
-
-                // lz10::decompress(
-                //     &input[gfcp_offset + 0x14..],
-                //     decompressed_size as usize
-                // )
             }
         };
 
-        let files: Vec<FileContents> = (0..file_count as usize)
-            .map(|i| {
+        let files: Vec<(String, Vec<u8>)> = (0..file_count as usize)
+            .map(|i|{
                 let offset = entries[i].decompressed_offset - gfcp_offset;
                 let size = entries[i].decompressed_size;
 
-                FileContents {
-                    contents: decompressed_chunk[offset..offset + size].to_vec(),
-                    filename: filenames[i].clone(),
-                }
+                (filenames[i].clone(), decompressed_chunk[offset..offset + size].to_vec())
             }).collect();
 
         Ok(files)
@@ -226,12 +208,9 @@ pub mod gfarch {
     ) -> Vec<u8> {
         assert_eq!(input.len(), filenames.len());
 
-        let files: Vec::<FileContents> = (0..input.len())
+        let files: Vec::<(String, Vec<u8>)> = (0..input.len())
             .map(|i| {
-                FileContents {
-                    contents: input[i].to_vec(),
-                    filename: filenames[i].clone()
-                }
+                (filenames[i].clone(), input[i].to_vec())
             }).collect();
 
 
@@ -241,7 +220,7 @@ pub mod gfarch {
     /// Creates a GfArch archive from given files.
     /// 
     /// ### Parameters
-    /// `input`: The files to be put in the archive.
+    /// `input`: The filenames and contents to be put in the archive,
     /// 
     /// `version`: The archive version.
     /// 
@@ -252,7 +231,7 @@ pub mod gfarch {
     /// ### Returns
     /// A `Vec<u8>`, containing the archive.
     pub fn pack_from_files(
-        input: &[FileContents],
+        input: &[(String, Vec<u8>)],
         version: Version,
         compression_type: CompressionType,
         offset: GFCPOffset
@@ -266,7 +245,7 @@ pub mod gfarch {
         let mut decompressed_chunk = Vec::new();
 
         for file in input.iter() {
-            decompressed_chunk.extend_from_slice(&file.contents);
+            decompressed_chunk.extend_from_slice(&file.1);
             decompressed_chunk.resize(
                 decompressed_chunk.len().next_multiple_of(0x10),
                 0
@@ -282,7 +261,7 @@ pub mod gfarch {
         let mut file_name_section_length = 0usize;
 
         for file in input.iter() {
-            file_name_section_length += file.filename.len();
+            file_name_section_length += file.0.len();
         }
 
         let archive_size = match offset {
@@ -360,7 +339,7 @@ pub mod gfarch {
 
         let mut decompressed_offset = 0x30 + file_info_size;
         for i in 0..file_count {
-            let checksum = calculate_checksum(&input[i].filename);
+            let checksum = calculate_checksum(&input[i].0);
             let name_offset = if i == file_count - 1 {
                 // if last entry, apply a flag to indicate so
                 cur_name_offset as u32 | 0x80000000
@@ -379,20 +358,20 @@ pub mod gfarch {
             // name offset
             LittleEndian::write_u32(&mut output[offset + 4..offset + 8], name_offset);
             // size
-            LittleEndian::write_u32(&mut output[offset + 8..offset + 0xC], input[i].contents.len() as u32);
+            LittleEndian::write_u32(&mut output[offset + 8..offset + 0xC], input[i].1.len() as u32);
             // offset
             LittleEndian::write_u32(&mut output[offset + 0xC..offset + 0x10], data_offset);
 
             // update offsets
-            cur_name_offset += input[i].filename.len() + 1;
-            decompressed_offset += (input[i].contents.len() as u32).next_multiple_of(0x10);
+            cur_name_offset += input[i].0.len() + 1;
+            decompressed_offset += (input[i].1.len() as u32).next_multiple_of(0x10);
         }
 
         // write strings
         let mut name_offs = 0x30 + (file_count * 0x10);
 
         for file in input.iter() {
-            let filename_bytes = file.filename.as_bytes();
+            let filename_bytes = file.0.as_bytes();
             output[name_offs..name_offs + filename_bytes.len()].copy_from_slice(filename_bytes);
             name_offs += filename_bytes.len();
                 
