@@ -1,77 +1,8 @@
-pub mod lz10 {
-    /// Adapted from https://github.com/LittleBigBug/QuickBMS/blob/master/src/included/nintendo.c
-    /// 
-    /// ### Parameters
-    /// `input`: The data to be decompressed.
-    /// `out_size`: The size of the output data.
-    /// 
-    /// ### Returns
-    /// A `Vec<u8>` of decompressed data.
-    pub fn decompress(input: &[u8], out_size: usize) -> Vec<u8> {
-        let mut output = vec![0u8; out_size];
-        let mut out_seek = 0;
-        let mut in_seek = 0;
-        let in_size = input.len();
-
-        while in_seek < in_size {
-            if in_seek >= in_size {
-                break;
-            }
-            let mut flags = input[in_seek];
-            in_seek += 1;
-    
-            for _ in 0..8 {
-                if out_seek >= out_size {
-                    break;
-                }
-    
-                if flags & 0x80 != 0 {
-                    if in_seek + 2 > in_size {
-                        break;
-                    }
-    
-                    let info = ((input[in_seek] as usize) << 8) | (input[in_seek + 1] as usize);
-                    in_seek += 2;
-                    let num = 3 + ((info >> 12) & 0xF);
-                    let mut p = out_seek.wrapping_sub((info & 0xFFF) + 1);
-    
-                    if p >= out_size || out_seek + num > out_size {
-                        return vec![];
-                    }
-    
-                    for _ in 0..num {
-                        output[out_seek] = output[p];
-                        out_seek += 1;
-                        p += 1;
-                    }
-                } else {
-                    if in_seek >= in_size {
-                        break;
-                    }
-    
-                    if out_seek >= out_size {
-                        return vec![];
-                    }
-    
-                    output[out_seek] = input[in_seek];
-                    out_seek += 1;
-                    in_seek += 1;
-                }
-    
-                flags <<= 1;
-            }
-        }
-    
-        output
-    }
-}
-
 pub mod gfarch {
     use bpe_rs::bpe;
+    use nintendo_lz;
     use byteorder::{ByteOrder, LittleEndian};
     use thiserror;
-
-    use crate::lz10;
 
     #[derive(thiserror::Error, Debug)]
     /// Errors for various GfArch problems. 
@@ -83,7 +14,10 @@ pub mod gfarch {
         CompressionHeaderError,
 
         #[error("Unsupported compression type, found type with value {0}")]
-        UnsupportedCompressionTypeError(u32)
+        UnsupportedCompressionTypeError(u32),
+
+        #[error("Failed to decompress LZ10")]
+        LZ10DecompressError
     }
 
     /// Allows the user to specify a custom GFCP offset.
@@ -226,10 +160,28 @@ pub mod gfarch {
                     &input[gfcp_offset + 0xC..gfcp_offset + 0x10]
                 );
 
-                lz10::decompress(
-                    &input[gfcp_offset + 0x14..],
-                    decompressed_size as usize
-                )
+                // construct a header for nintendo_lz
+                let mut lz_chunk = vec![0x10];
+                lz_chunk.extend_from_slice(&decompressed_size.to_le_bytes()[..3]);
+                lz_chunk.extend_from_slice(&input[gfcp_offset + 0x14..]);
+
+
+                let result = nintendo_lz::decompress_arr(&lz_chunk);
+
+                if let Ok(decompressed) = result {
+                    decompressed
+                } else {
+                    return Err(GfArchError::LZ10DecompressError);
+                }
+
+                // let decompressed_size = LittleEndian::read_u32(
+                //     &input[gfcp_offset + 0xC..gfcp_offset + 0x10]
+                // );
+
+                // lz10::decompress(
+                //     &input[gfcp_offset + 0x14..],
+                //     decompressed_size as usize
+                // )
             }
         };
 
