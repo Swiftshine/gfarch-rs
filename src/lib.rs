@@ -1,4 +1,5 @@
 pub mod gfarch {
+    use std::io::Cursor;
     use bpe_rs::bpe;
     use nintendo_lz;
     use byteorder::{ByteOrder, LittleEndian};
@@ -154,8 +155,9 @@ pub mod gfarch {
                     &input[gfcp_offset + 0xC..gfcp_offset + 0x10]
                 );
 
-                // construct a header for nintendo_lz
-                let mut lz_chunk = vec![0x10];
+                // nintendo_lz works with headered chunks but GfArch does not.
+                // construct a 4-byte header
+                let mut lz_chunk = vec![0x10]; // LZ10
                 lz_chunk.extend_from_slice(&decompressed_size.to_le_bytes()[..3]);
                 lz_chunk.extend_from_slice(&input[gfcp_offset + 0x14..]);
 
@@ -255,7 +257,17 @@ pub mod gfarch {
         // compress all data
         let compressed_chunk = match compression_type {
             CompressionType::BPE => bpe::encode(&decompressed_chunk),
-            CompressionType::LZ10 => todo!()
+            CompressionType::LZ10 => {
+                // create a cursor so we can specify LZ10
+                let mut compressed: Vec<u8> = Vec::new();
+                let mut writer = Cursor::new(&mut compressed);
+                nintendo_lz::compress(&decompressed_chunk, &mut writer, nintendo_lz::CompressionLevel::LZ10).unwrap();
+
+                // nintendo_lz works with headered chunks but GfArch does not.
+                // the 4-byte header must be removed here
+
+                compressed[4..].to_vec()
+            }
         };
 
         let mut file_name_section_length = 0usize;
@@ -289,8 +301,8 @@ pub mod gfarch {
 
         // version
         LittleEndian::write_u32(&mut output[0x4..0x8], match version {
-            Version::V2 => 0x0200,
-            Version::V3 => 0x0300,
+            Version::V2 =>   0x0200,
+            Version::V3 =>   0x0300,
             Version::V3_1 => 0x0301,
         });
 
@@ -397,7 +409,7 @@ pub mod gfarch {
             &mut output[gfcp_offset + 8..gfcp_offset + 0xC],
 
             match compression_type {
-                CompressionType::BPE => 1,
+                CompressionType::BPE =>  1,
                 CompressionType::LZ10 => 3
             }
         );
