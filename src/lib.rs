@@ -38,6 +38,7 @@ pub mod gfarch {
     #[derive(PartialEq)]
     /// The compression type of a GfArch archive.
     pub enum CompressionType {
+        None,
         BPE,
         LZ10
     }
@@ -140,6 +141,7 @@ pub mod gfarch {
 
         let raw_compression_type = LittleEndian::read_u32(&input[gfcp_offset + 0x8..gfcp_offset + 0xC]); 
         let compression_type = match raw_compression_type {
+            0 => CompressionType::None,
             1 => CompressionType::BPE,
             3 => CompressionType::LZ10,
             _ => {
@@ -149,6 +151,10 @@ pub mod gfarch {
 
 
         let decompressed_chunk = match compression_type {
+            CompressionType::None => {
+                input[gfcp_offset + 0x14..].to_vec()
+            }
+
             CompressionType::BPE => bpe::decode(&input[gfcp_offset + 0x14..], bpe::DEFAULT_STACK_SIZE),
             CompressionType::LZ10 => {
                 let decompressed_size = LittleEndian::read_u32(
@@ -256,6 +262,7 @@ pub mod gfarch {
 
         // compress all data
         let compressed_chunk = match compression_type {
+            CompressionType::None => decompressed_chunk.clone(),
             CompressionType::BPE => bpe::encode(&decompressed_chunk),
             CompressionType::LZ10 => {
                 // create a cursor so we can specify LZ10
@@ -307,7 +314,7 @@ pub mod gfarch {
         });
 
         // is compressed
-        output[0x8] = 1;
+        output[0x8] = if matches!(compression_type, CompressionType::None) { 0 } else { 1 };
 
         // file entry offset
         LittleEndian::write_u32(&mut output[0xC..0x10], 0x2C);
@@ -409,6 +416,7 @@ pub mod gfarch {
             &mut output[gfcp_offset + 8..gfcp_offset + 0xC],
 
             match compression_type {
+                CompressionType::None => 0,
                 CompressionType::BPE =>  1,
                 CompressionType::LZ10 => 3
             }

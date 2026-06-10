@@ -2,13 +2,10 @@
 Rust crate for handling Good-Feel's [GfArch files](https://swiftshine.github.io/doc/gfa.html).
 
 ## Capabilities
-### Archive Creation
-- [X] Archives with Byte Pair Encoding
-- [X] Archives with LZ10
-
-### Archive Extraction
-- [X] Archives with Byte Pair Encoding
-- [X] Archives with LZ10
+You can extract and create archives that use the following compression algorithms:
+- None
+- Byte Pair Encoding
+- LZ10
 
 ## Usage
 ### Archive Creation
