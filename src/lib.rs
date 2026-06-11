@@ -133,27 +133,27 @@ pub mod gfarch {
 
         let gfcp_offset = LittleEndian::read_u32(&input[0x14..0x18]) as usize;
 
-        if &input[gfcp_offset..gfcp_offset + 4] != b"GFCP" {
-            return Err(GfArchError::CompressionHeaderError);
-        }
-
-        // decompress files
-
-        let raw_compression_type = LittleEndian::read_u32(&input[gfcp_offset + 0x8..gfcp_offset + 0xC]); 
-        let compression_type = match raw_compression_type {
-            0 => CompressionType::None,
-            1 => CompressionType::BPE,
-            3 => CompressionType::LZ10,
-            _ => {
-                return Err(GfArchError::UnsupportedCompressionTypeError(raw_compression_type))
-            }
-        };
-
         let is_compressed = input[0x8] != 0;
 
         let decompressed_chunk = if !is_compressed {
             input[gfcp_offset..].to_vec()
         } else {
+            if &input[gfcp_offset..gfcp_offset + 4] != b"GFCP" {
+                return Err(GfArchError::CompressionHeaderError);
+            }
+    
+            // decompress files
+    
+            let raw_compression_type = LittleEndian::read_u32(&input[gfcp_offset + 0x8..gfcp_offset + 0xC]); 
+            let compression_type = match raw_compression_type {
+                0 => CompressionType::None,
+                1 => CompressionType::BPE,
+                3 => CompressionType::LZ10,
+                _ => {
+                    return Err(GfArchError::UnsupportedCompressionTypeError(raw_compression_type))
+                }
+            };
+ 
             let decompressed_chunk = match compression_type {
                 CompressionType::None => unreachable!(), // we already handled it
     
@@ -368,7 +368,7 @@ pub mod gfarch {
             0x30 + // header size
             (file_count * 0x10); // file entries
 
-        let mut decompressed_offset = 0x30 + file_info_size;
+        let mut decompressed_offset = gfcp_offset;
         for i in 0..file_count {
             let checksum = calculate_checksum(&input[i].0);
             let name_offset = if i == file_count - 1 {
@@ -378,8 +378,6 @@ pub mod gfarch {
                 cur_name_offset as u32
             };
             
-            let data_offset = decompressed_offset;
-            
             // checksum
             let _ = output.write_u32::<LittleEndian>(checksum);
             // name offset
@@ -387,15 +385,12 @@ pub mod gfarch {
             // size
             let _ = output.write_u32::<LittleEndian>(input[i].1.len() as u32);
             // offset
-            let _ = output.write_u32::<LittleEndian>(data_offset);
+            let _ = output.write_u32::<LittleEndian>(decompressed_offset);
 
             // update offsets
             cur_name_offset += input[i].0.len() + 1;
             decompressed_offset += (input[i].1.len() as u32).next_multiple_of(0x10);
         }
-
-        // write strings
-        // let mut name_offs = 0x30 + (file_count * 0x10);
 
         for file in input.iter() {
             let filename_bytes = file.0.as_bytes();
@@ -434,7 +429,7 @@ pub mod gfarch {
             // write the compressed data
             output.extend(&compressed_chunk);
         }
-        
+
         output
     }
 
