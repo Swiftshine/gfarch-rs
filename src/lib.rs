@@ -41,6 +41,20 @@ pub enum CompressionType {
     None,
     BPE,
     LZ10,
+
+    #[cfg(feature = "zlib")]
+    Zlib,
+}
+
+#[repr(u32)]
+enum RawCompressionType {
+    None = 0,
+    BPE = 1,
+    LZ10 = 3,
+
+    // Arbitrary values
+    #[cfg(feature = "zlib")]
+    Zlib = 10,
 }
 
 struct FileEntry {
@@ -146,10 +160,15 @@ pub fn extract(input: &[u8]) -> Result<Vec<(String, Vec<u8>)>, GfArchError> {
 
         let raw_compression_type =
             LittleEndian::read_u32(&input[gfcp_offset + 0x8..gfcp_offset + 0xC]);
+        
         let compression_type = match raw_compression_type {
-            0 => CompressionType::None,
-            1 => CompressionType::BPE,
-            3 => CompressionType::LZ10,
+            val if val == RawCompressionType::None as u32 => CompressionType::None,
+            val if val == RawCompressionType::BPE as u32 => CompressionType::BPE,
+            val if val == RawCompressionType::LZ10 as u32 => CompressionType::LZ10,
+
+            #[cfg(feature = "zlib")]
+            val if val == RawCompressionType::Zlib as u32 => CompressionType::Zlib,
+            
             _ => {
                 return Err(GfArchError::UnsupportedCompressionTypeError(
                     raw_compression_type,
@@ -163,6 +182,7 @@ pub fn extract(input: &[u8]) -> Result<Vec<(String, Vec<u8>)>, GfArchError> {
             CompressionType::BPE => {
                 bpe::decode(&input[gfcp_offset + 0x14..], bpe::DEFAULT_STACK_SIZE)
             }
+
             CompressionType::LZ10 => {
                 let decompressed_size =
                     LittleEndian::read_u32(&input[gfcp_offset + 0xC..gfcp_offset + 0x10]);
@@ -180,6 +200,17 @@ pub fn extract(input: &[u8]) -> Result<Vec<(String, Vec<u8>)>, GfArchError> {
                 } else {
                     return Err(GfArchError::LZ10DecompressError);
                 }
+            }
+
+            #[cfg(feature = "zlib")]
+            CompressionType::Zlib => {
+                use flate2::read::ZlibDecoder;
+                use std::io::Read;
+
+                let mut decoder = ZlibDecoder::new(&input[gfcp_offset + 0x14..]);
+                let mut output = Vec::new();
+                decoder.read_to_end(&mut output).unwrap();
+                output
             }
         };
 
@@ -268,7 +299,9 @@ pub fn pack_from_files(
     // compress all data
     let compressed_chunk = match compression_type {
         CompressionType::None => decompressed_chunk.clone(),
+
         CompressionType::BPE => bpe::encode(&decompressed_chunk),
+
         CompressionType::LZ10 => {
             // create a cursor so we can specify LZ10
             let mut compressed: Vec<u8> = Vec::new();
@@ -284,6 +317,16 @@ pub fn pack_from_files(
             // the 4-byte header must be removed here
 
             compressed[4..].to_vec()
+        }
+
+        #[cfg(feature = "zlib")]
+        CompressionType::Zlib => {
+            use flate2::{Compression, write::ZlibEncoder};
+            use std::io::Write;
+
+            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(&decompressed_chunk);
+            encoder.finish().unwrap()
         }
     };
 
@@ -419,10 +462,13 @@ pub fn pack_from_files(
 
         // compression type
         let _ = output.write_u32::<LittleEndian>(match compression_type {
-            CompressionType::None => 0,
-            CompressionType::BPE => 1,
-            CompressionType::LZ10 => 3,
-        });
+            CompressionType::None => RawCompressionType::None,
+            CompressionType::BPE => RawCompressionType::BPE,
+            CompressionType::LZ10 => RawCompressionType::LZ10,
+
+            #[cfg(feature = "zlib")]
+            CompressionType::Zlib => RawCompressionType::Zlib
+        } as u32);
 
         // decompressed size
         let _ = output.write_u32::<LittleEndian>(decompressed_chunk.len() as u32);

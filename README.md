@@ -35,6 +35,11 @@ You can extract and create archives that use the following compression algorithm
     let files = gfarch::extract(&archive)?;
 ```
 
+## Custom Compression Types
+Below is a table of custom compression types that can be used instead of BPE or LZ10. To use one, enable its feature.
+| Compression | GFCP Value (Decimal) |
+| - | - |
+| `zlib` | `10` |
 
 ## Notable Dependencies
 - [bpe-rs](https://crates.io/crates/bpe-rs/)

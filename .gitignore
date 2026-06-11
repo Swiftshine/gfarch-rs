@@ -2,3 +2,5 @@
 main.rs
 scratch/
 *.gfa
+.vscode/
+.zed/
