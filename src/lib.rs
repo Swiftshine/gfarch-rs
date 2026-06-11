@@ -2,7 +2,7 @@ pub mod gfarch {
     use std::io::Cursor;
     use bpe_rs::bpe;
     use nintendo_lz;
-    use byteorder::{ByteOrder, LittleEndian};
+    use byteorder::{ByteOrder, LittleEndian, WriteBytesExt};
     use thiserror;
 
     #[derive(thiserror::Error, Debug)]
@@ -182,7 +182,7 @@ pub mod gfarch {
 
             decompressed_chunk
         };
-        
+
         let files: Vec<(String, Vec<u8>)> = (0..file_count as usize)
             .map(|i|{
                 let offset = entries[i].decompressed_offset - gfcp_offset;
@@ -288,41 +288,48 @@ pub mod gfarch {
             file_name_section_length += file.0.len();
         }
 
-        let archive_size = match offset {
+        let is_compressed = !matches!(compression_type, CompressionType::None);
+
+        let compression_header_size = if is_compressed { 0x14 } else { 0 };
+
+        let _archive_size = match offset {
             GFCPOffset::Default => {
                 0x30 + // archive header
                 (file_count * 0x10) + // file entries
                 file_name_section_length.next_multiple_of(0x10) + // filenames
-                0x14 + // compression header
+                compression_header_size + // compression header
                 compressed_chunk.len() // compressed data
             }
 
             GFCPOffset::Custom(offs) => {
-                offs + 0x14 + compressed_chunk.len()
+                offs + compression_header_size + compressed_chunk.len()
             }
         };
         
         // write archive header
-        let mut output = vec![0u8; archive_size];
+        // let mut output = vec![0u8; archive_size];
+        let mut output = Vec::new();
         
         // magic
-        output[0] = b'G';
-        output[1] = b'F';
-        output[2] = b'A';
-        output[3] = b'C';
+        output.extend(b"GFAC");
 
         // version
-        LittleEndian::write_u32(&mut output[0x4..0x8], match version {
+        let _ = output.write_u32::<LittleEndian>(match version {
             Version::V2 =>   0x0200,
             Version::V3 =>   0x0300,
             Version::V3_1 => 0x0301,
         });
-
+        
         // is compressed
-        output[0x8] = if matches!(compression_type, CompressionType::None) { 0 } else { 1 };
+        let _ = output.write_u8(if matches!(compression_type, CompressionType::None) { 0 } else { 1 });
+        
+        // padding
+        for _ in 0..3 {
+            output.push(0);
+        }
 
         // file entry offset
-        LittleEndian::write_u32(&mut output[0xC..0x10], 0x2C);
+        let _ = output.write_u32::<LittleEndian>(0x2C);
 
         // file info size
         let file_info_size: u32 =
@@ -332,7 +339,8 @@ pub mod gfarch {
             file_count as u32; // (plus null terminators)
 
 
-        LittleEndian::write_u32(&mut output[0x10..0x14], file_info_size);
+        let _ = output.write_u32::<LittleEndian>(file_info_size);
+
 
         let file_info_size = file_info_size.next_multiple_of(0x10);
 
@@ -342,19 +350,18 @@ pub mod gfarch {
             GFCPOffset::Custom(offs) => offs as u32
         };
 
-        LittleEndian::write_u32(&mut output[0x14..0x18], gfcp_offset);
+        let _ = output.write_u32::<LittleEndian>(gfcp_offset);
 
         // payload size
-        LittleEndian::write_u32(
-            &mut output[0x18..0x1C],
-            {
-                0x14 + // gfcp header
-                compressed_chunk.len() as u32
-            }
-        );
-
+        let _ = output.write_u32::<LittleEndian>((compression_header_size + compressed_chunk.len()) as u32);
+        
+        // more padding
+        for _ in 0..0x10 {
+            output.push(0);
+        }
+                
         // file count
-        LittleEndian::write_u32(&mut output[0x2C..0x30], file_count as u32);
+        let _ = output.write_u32::<LittleEndian>(file_count as u32);
 
         // write file entries
         let mut cur_name_offset =
@@ -371,20 +378,16 @@ pub mod gfarch {
                 cur_name_offset as u32
             };
             
-            
             let data_offset = decompressed_offset;
             
-            let offset = 0x30 + (i * 0x10);
-            
-            
             // checksum
-            LittleEndian::write_u32(&mut output[offset..offset + 4], checksum);
+            let _ = output.write_u32::<LittleEndian>(checksum);
             // name offset
-            LittleEndian::write_u32(&mut output[offset + 4..offset + 8], name_offset);
+            let _ = output.write_u32::<LittleEndian>(name_offset);
             // size
-            LittleEndian::write_u32(&mut output[offset + 8..offset + 0xC], input[i].1.len() as u32);
+            let _ = output.write_u32::<LittleEndian>(input[i].1.len() as u32);
             // offset
-            LittleEndian::write_u32(&mut output[offset + 0xC..offset + 0x10], data_offset);
+            let _ = output.write_u32::<LittleEndian>(data_offset);
 
             // update offsets
             cur_name_offset += input[i].0.len() + 1;
@@ -392,63 +395,46 @@ pub mod gfarch {
         }
 
         // write strings
-        let mut name_offs = 0x30 + (file_count * 0x10);
+        // let mut name_offs = 0x30 + (file_count * 0x10);
 
         for file in input.iter() {
             let filename_bytes = file.0.as_bytes();
-            output[name_offs..name_offs + filename_bytes.len()].copy_from_slice(filename_bytes);
-            name_offs += filename_bytes.len();
-                
-            output[name_offs] = 0; // null terminator
-            name_offs += 1;
+            output.extend_from_slice(filename_bytes);
+            output.push(0); // null terminator
         }
 
-        // write compression header
-        // magic
-
         let gfcp_offset = gfcp_offset as usize;
-        output[gfcp_offset] = b'G';
-        output[gfcp_offset + 1] = b'F';
-        output[gfcp_offset + 2] = b'C';
-        output[gfcp_offset + 3] = b'P';
 
-        
-        // "version" -- this value is always 1
-        LittleEndian::write_u32(&mut output[gfcp_offset + 4..gfcp_offset + 8], 1);
+        // padding
+        output.resize(gfcp_offset.next_multiple_of(0x10), 0);
 
-        // write compression type
-        LittleEndian::write_u32(
-            &mut output[gfcp_offset + 8..gfcp_offset + 0xC],
+        if !is_compressed {
+            output.extend(&compressed_chunk);
+        } else {
+            // write compression header
+            // magic
+            output.extend_from_slice(b"GFCP");
+            
+            // "version" -- this value is always 1
+            let _ = output.write_u32::<LittleEndian>(1);
 
-            match compression_type {
+            // compression type
+            let _ = output.write_u32::<LittleEndian>(match compression_type {
                 CompressionType::None => 0,
                 CompressionType::BPE =>  1,
                 CompressionType::LZ10 => 3
-            }
-        );
+            });
 
-        // decompressed size
-        LittleEndian::write_u32(
-            &mut output[gfcp_offset + 0xC..gfcp_offset + 0x10],
-            decompressed_chunk.len() as u32
-        );
+            // decompressed size
+            let _ = output.write_u32::<LittleEndian>(decompressed_chunk.len() as u32);
 
-        // compressed size
-        LittleEndian::write_u32(
-            &mut output[gfcp_offset + 0x10..gfcp_offset + 0x14],
-            compressed_chunk.len() as u32
-        );
-
-        // write the compressed data
-
-        let target_offset = gfcp_offset + 0x14;
-        let target_len = compressed_chunk.len();
-        if target_offset + target_len > output.len() {
-            output.resize(target_offset + target_len, 0);
+            // compressed size
+            let _ = output.write_u32::<LittleEndian>(compressed_chunk.len() as u32);
+   
+            // write the compressed data
+            output.extend(&compressed_chunk);
         }
-
-        output[target_offset..target_offset + target_len]
-            .copy_from_slice(&compressed_chunk);
+        
         output
     }
 
