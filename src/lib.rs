@@ -325,7 +325,7 @@ pub fn pack_from_files(
             use std::io::Write;
 
             let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-            encoder.write_all(&decompressed_chunk);
+            let _ = encoder.write_all(&decompressed_chunk);
             encoder.finish().unwrap()
         }
     };
