@@ -149,35 +149,40 @@ pub mod gfarch {
             }
         };
 
+        let is_compressed = input[0x8] != 0;
 
-        let decompressed_chunk = match compression_type {
-            CompressionType::None => {
-                input[gfcp_offset + 0x14..].to_vec()
-            }
-
-            CompressionType::BPE => bpe::decode(&input[gfcp_offset + 0x14..], bpe::DEFAULT_STACK_SIZE),
-            CompressionType::LZ10 => {
-                let decompressed_size = LittleEndian::read_u32(
-                    &input[gfcp_offset + 0xC..gfcp_offset + 0x10]
-                );
-
-                // nintendo_lz works with headered chunks but GfArch does not.
-                // construct a 4-byte header
-                let mut lz_chunk = vec![0x10]; // LZ10
-                lz_chunk.extend_from_slice(&decompressed_size.to_le_bytes()[..3]);
-                lz_chunk.extend_from_slice(&input[gfcp_offset + 0x14..]);
-
-
-                let result = nintendo_lz::decompress_arr(&lz_chunk);
-
-                if let Ok(decompressed) = result {
-                    decompressed
-                } else {
-                    return Err(GfArchError::LZ10DecompressError);
+        let decompressed_chunk = if !is_compressed {
+            input[gfcp_offset..].to_vec()
+        } else {
+            let decompressed_chunk = match compression_type {
+                CompressionType::None => unreachable!(), // we already handled it
+    
+                CompressionType::BPE => bpe::decode(&input[gfcp_offset + 0x14..], bpe::DEFAULT_STACK_SIZE),
+                CompressionType::LZ10 => {
+                    let decompressed_size = LittleEndian::read_u32(
+                        &input[gfcp_offset + 0xC..gfcp_offset + 0x10]
+                    );
+    
+                    // nintendo_lz works with headered chunks but GfArch does not.
+                    // construct a 4-byte header
+                    let mut lz_chunk = vec![0x10]; // LZ10
+                    lz_chunk.extend_from_slice(&decompressed_size.to_le_bytes()[..3]);
+                    lz_chunk.extend_from_slice(&input[gfcp_offset + 0x14..]);
+    
+    
+                    let result = nintendo_lz::decompress_arr(&lz_chunk);
+    
+                    if let Ok(decompressed) = result {
+                        decompressed
+                    } else {
+                        return Err(GfArchError::LZ10DecompressError);
+                    }
                 }
-            }
-        };
+            };
 
+            decompressed_chunk
+        };
+        
         let files: Vec<(String, Vec<u8>)> = (0..file_count as usize)
             .map(|i|{
                 let offset = entries[i].decompressed_offset - gfcp_offset;
