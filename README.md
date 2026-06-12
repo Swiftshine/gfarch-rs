@@ -15,7 +15,8 @@ You can extract and create archives that use the following compression algorithm
         &files,
         Version::V3,
         CompressionType::BPE,
-        GFCPOffset::Default
+        GFCPOffset::Default,
+        Alignment::Default,
     );
 
     // "archive_2" is now also a GoodFeelArchive
@@ -24,7 +25,8 @@ You can extract and create archives that use the following compression algorithm
         &filenames,
         Version::V3,
         CompressionType::BPE,
-        GFCPOffset::Default
+        GFCPOffset::Custom(0x2000), // you can specify a custom offset for the compressed data
+        Alignment::Custom(0x2000), // and you can also specify alignment for decompressed data
     );
 
 ```

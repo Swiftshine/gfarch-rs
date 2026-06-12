@@ -57,6 +57,12 @@ enum RawCompressionType {
     Zlib = 10,
 }
 
+/// Specifies decompressed data alignment
+pub enum Alignment {
+    Default, // 0x10
+    Custom(usize)
+}
+
 struct FileEntry {
     name_offset: usize,
     decompressed_size: usize,
@@ -254,6 +260,7 @@ pub fn pack_from_bytes(
     version: Version,
     compression_type: CompressionType,
     offset: GFCPOffset,
+    alignment: Alignment
 ) -> Vec<u8> {
     assert_eq!(input.len(), filenames.len());
 
@@ -261,7 +268,7 @@ pub fn pack_from_bytes(
         .map(|i| (filenames[i].clone(), input[i].to_vec()))
         .collect();
 
-    pack_from_files(&files, version, compression_type, offset)
+    pack_from_files(&files, version, compression_type, offset, alignment)
 }
 
 /// Creates a GfArch archive from given files.
@@ -282,9 +289,15 @@ pub fn pack_from_files(
     version: Version,
     compression_type: CompressionType,
     offset: GFCPOffset,
+    alignment: Alignment
 ) -> Vec<u8> {
     // Yoshi's Woolly World is the only known game
     // that consistently picks the same offset
+    
+    let alignment = match alignment {
+        Alignment::Default => 0x10,
+        Alignment::Custom(align) => align
+    };
 
     let file_count = input.len();
 
@@ -293,7 +306,7 @@ pub fn pack_from_files(
 
     for file in input.iter() {
         decompressed_chunk.extend_from_slice(&file.1);
-        decompressed_chunk.resize(decompressed_chunk.len().next_multiple_of(0x10), 0);
+        decompressed_chunk.resize(decompressed_chunk.len().next_multiple_of(alignment), 0);
     }
 
     // compress all data
@@ -432,11 +445,11 @@ pub fn pack_from_files(
         // size
         let _ = output.write_u32::<LittleEndian>(input[i].1.len() as u32);
         // offset
-        let _ = output.write_u32::<LittleEndian>(decompressed_offset);
+        let _ = output.write_u32::<LittleEndian>(decompressed_offset.next_multiple_of(alignment as u32));
 
         // update offsets
         cur_name_offset += input[i].0.len() + 1;
-        decompressed_offset += (input[i].1.len() as u32).next_multiple_of(0x10);
+        decompressed_offset += (input[i].1.len() as u32).next_multiple_of(alignment as u32);
     }
 
     for file in input.iter() {
